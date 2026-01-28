@@ -560,17 +560,28 @@ const Store = {
         const DORMS = ["Dorm 1", "Dorm 2", "Dorm 3", "Dorm 4"];
         let idCounter = 1000;
 
+        const freeFeeDistribution = {
+            "Form 1": 3,
+            "Form 2": 3,
+            "Form 3": 5,
+            "Form 4": 4
+        };
+
         GRADES.forEach(grade => {
+            let freeRemaining = freeFeeDistribution[grade];
+
             SECTIONS.forEach(section => {
-                for (let i = 0; i < 20; i++) {
+                for (let i = 0; i < 15; i++) {
                     const fname = firstNames[Math.floor(Math.random() * firstNames.length)];
                     const lname = lastNames[Math.floor(Math.random() * lastNames.length)];
-
-                    // Assign dorms based on index to ensure even distribution
                     const dorm = DORMS[Math.floor(Math.random() * DORMS.length)];
 
-                    // Exactly 5 students per section are "Free Fee"
-                    const isFree = i < 5;
+                    // Assign free fee status based on distribution count
+                    let isFree = false;
+                    if (freeRemaining > 0) {
+                        isFree = true;
+                        freeRemaining--;
+                    }
 
                     const student = {
                         id: `STU-${idCounter++}`,
@@ -584,9 +595,9 @@ const Store = {
                         parentPhone: `615-${100000 + Math.floor(Math.random() * 900000)}`,
                         enrollmentDate: "2024-09-01",
                         isActive: true,
-                        gender: Math.random() > 0.5 ? 'Male' : 'Female',
+                        gender: Math.random() > 0.6 ? 'Female' : 'Male', // Slightly more males as per request (70/50 approx)
                         status: 'Active',
-                        performanceRemarks: i % 5 === 0 ? 'Excellent progress' : ''
+                        performanceRemarks: ''
                     };
                     this.state.students.push(student);
                 }
