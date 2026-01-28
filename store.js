@@ -71,21 +71,25 @@ const Store = {
 
     async loadRecoveredData() {
         try {
-            const response = await fetch('al-huda-data.json');
+            // Add a timeout to the fetch call
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000); // 3-second timeout
+
+            const response = await fetch('al-huda-data.json', { signal: controller.signal });
+            clearTimeout(timeoutId);
+
             if (response.ok) {
                 const data = await response.json();
                 if (data && data.students && data.students.length > 0) {
-                    // Success! Overwrite current state with recovered data
-                    // Use a very old timestamp so Cloud Sync can overwrite it if newer data exists
                     this.state = { ...this.state, ...data, lastUpdated: 1 };
-                    this.saveToStorage(false); // Don't trigger cloud sync yet, wait for Auth
+                    this.saveToStorage(false);
                     this.logAction('System', 'Data restored from local JSON file');
                     console.log('✅ Recovered data loaded successfully');
                     return true;
                 }
             }
         } catch (e) {
-            console.log('ℹ️ No recovery JSON file found or error parsing it.');
+            console.log('ℹ️ Initialization: Local JSON recovery skipped or timed out.');
         }
         return false;
     },

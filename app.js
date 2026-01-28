@@ -24,7 +24,14 @@ const App = {
     },
 
     async init() {
-        await Store.init();
+        try {
+            console.log('🚀 Application starting...');
+            await Store.init();
+        } catch (e) {
+            console.error('⚠️ Critical: Store initialization failed:', e);
+            // App continues to checkAuth/showLogin even if Store has partial failure
+        }
+
         this.checkAuth();
         this.setupEventListeners();
 
