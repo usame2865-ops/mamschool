@@ -71,7 +71,7 @@ const Store = {
 
     async loadRecoveredData() {
         try {
-            const response = await fetch('Al-huda school data.json');
+            const response = await fetch('al-huda-data.json');
             if (response.ok) {
                 const data = await response.json();
                 if (data && data.students && data.students.length > 0) {
