@@ -166,7 +166,7 @@ const App = {
 
         // Modals
         const closeModals = (id) => this.toggleModal(id, false);
-        ['modal-container', 'edit-student-modal', 'att-modal-container', 'add-teacher-modal', 'edit-teacher-modal', 'leadership-modal'].forEach(id => {
+        ['modal-container', 'edit-student-modal', 'att-modal-container'].forEach(id => {
             const el = document.getElementById(id);
             if (el) {
                 el.addEventListener('click', (e) => { if (e.target === el) closeModals(id); });
@@ -402,34 +402,16 @@ const App = {
 
         navItems.forEach(item => {
             const view = item.getAttribute('data-view');
-            const user = JSON.parse(sessionStorage.getItem('dugsiga_user'));
-            const permissions = user?.permissions || {};
 
-            if (role === 'owner' || role === 'admin' || permissions.admin) {
-                item.style.display = 'flex';
-            } else {
-                // Granular check
-                const permKeys = {
-                    'dashboard': 'dashboard',
-                    'attendance': 'attendance',
-                    'students': 'students',
-                    'teachers': 'teachers',
-                    'fees': 'fee',
-                    'exams': 'exams',
-                    'reports': 'reports',
-                    'users': 'users and setting',
-                    'free-fee-students': 'free fee students',
-                    'data-management': 'data management',
-                    'messaging': 'messaging',
-                    'parent-messages': 'private messaging'
-                };
-
-                const key = permKeys[view];
-                if (key && permissions[key]) {
-                    item.style.display = 'flex';
-                } else {
-                    item.style.display = 'none';
-                }
+            if (role === 'owner') {
+                item.style.display = 'flex'; // Owner sees EVERYTHING
+            } else if (role === 'principal') {
+                // Principal sees everything but Users & Settings
+                item.style.display = (view !== 'users') ? 'flex' : 'none';
+            } else if (role === 'teacher') {
+                item.style.display = (view === 'attendance') ? 'flex' : 'none';
+            } else if (role === 'fees') {
+                item.style.display = (view === 'fees') ? 'flex' : 'none';
             }
         });
 
@@ -582,112 +564,81 @@ const App = {
             'parent-messages': 'Private Parent Messages',
             'exams': 'Examination Management'
         }[viewName] || 'Dashboard';
+
+        this.refreshCurrentView();
     },
 
     renderDashboard(container) {
         const students = Store.getStudents();
         const teachers = Store.getTeachers();
-        const fees = Store.getFees();
         const attendance = Store.getAttendance();
+        const fees = Store.getFees();
 
-        // 1. Student Information (DYNAMIC)
+        // 1. Basic Counts
         const totalStudents = students.length;
         const maleStudents = students.filter(s => s.gender === 'Male').length;
         const femaleStudents = students.filter(s => s.gender === 'Female').length;
-        const graduatedCount = students.filter(s => s.grade === 'Form 4').length;
-
-        // 2. Teacher & Staff (DYNAMIC)
         const totalTeachers = teachers.length;
-        const totalSalaries = teachers.reduce((sum, t) => sum + (t.salary || 250), 0);
 
-        // 3. Attendance Information (DYNAMIC)
-        const todayStr = new Date().toISOString().split('T')[0];
-        const currentMonthData = new Date().toISOString().slice(0, 7);
-        const attendanceThisMonth = attendance.filter(a => a.date.startsWith(currentMonthData)).length;
-        const allTotalAttendance = attendance.length;
-        const presentToday = attendance.filter(a => a.date === todayStr && a.status === 'Present').length;
-        const absentToday = attendance.filter(a => a.date === todayStr && a.status === 'Absent').length;
+        // 2. Academic & Financial
+        const graduated = students.filter(s => s.status === 'Graduated').length;
 
-        // 4. Financial Information (DYNAMIC)
-        const currentMonthName = new Date().toLocaleString('default', { month: 'long' });
-        const totalCollectedThisMonth = fees.filter(f => f.month === currentMonthName && f.status === 'PAID').reduce((sum, f) => sum + (f.amountPaid || 0), 0);
-        const totalPaidThisMonth = totalSalaries; // Simplified: Salaries as primary expense
+        const currentMonth = new Date().toLocaleString('default', { month: 'long' });
+        const monthlyFees = fees.filter(f => f.month === currentMonth);
+        const collected = monthlyFees.filter(f => f.status === 'PAID').reduce((sum, f) => sum + f.amountPaid, 0);
 
-        // Derived Metrics for collected vs pending
-        const collectedRevenue = fees.filter(f => f.status === 'PAID').reduce((sum, f) => sum + (f.amountPaid || 0), 0);
-        const pendingRevenue = fees.filter(f => f.status === 'UNPAID').reduce((sum, f) => sum + (f.amount || 20), 0);
-        const expectedRevenue = collectedRevenue + pendingRevenue;
+        const currentYearPrefix = Store.state.currentYear.split('-')[0];
+        const monthlyAttendance = attendance.filter(a => a.date.startsWith(new Date().toISOString().slice(0, 7))).length;
+        const totalAttendance = attendance.length;
+
+        // 3. Salaries & Daily Stats
+        const totalSalaries = teachers.reduce((sum, t) => sum + (t.salary || 0), 0);
+        const paidThisMonth = monthlyFees.filter(f => f.status === 'PAID').length; // Count of paid students
+
+        const today = new Date().toISOString().split('T')[0];
+        const todayAtt = attendance.filter(a => a.date === today);
+        const presentToday = todayAtt.filter(a => a.status === 'Present').length;
+        const absentToday = todayAtt.filter(a => a.status === 'Absent').length;
+        const lateToday = todayAtt.filter(a => a.status === 'Late').length;
 
         container.innerHTML = `
-            <div class="animate-fade-in" style="max-width: 1400px; margin: 0 auto; padding: 1rem;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
-                    <h1 style="font-size: 1.5rem; font-weight: 700; color: #111827;">Dashboard Overview</h1>
-                </div>
-
-                <!-- 1. STUDENT INFORMATION -->
-                <p style="text-transform: uppercase; font-size: 0.75rem; font-weight: 700; color: #6b7280; margin-bottom: 1rem; letter-spacing: 0.05em;">1. Student Information</p>
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; margin-bottom: 2.5rem;">
+            <div class="animate-fade-in">
+                <h2 style="font-size:1.5rem; font-weight:bold; color:var(--color-primary-text); margin-bottom:1.5rem;">Dashboard</h2>
+                
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.5rem;">
+                    <!-- Row 1 -->
                     ${this.createStatCard('Total Students', totalStudents, 'users', '#3b82f6')}
                     ${this.createStatCard('Male Students', maleStudents, 'arrow-up', '#3b82f6')}
-                    ${this.createStatCard('Female Students', femaleStudents, 'heart', '#ec4899')}
-                    ${this.createStatCard('Graduated Students', graduatedCount, 'award', '#f59e0b')}
-                </div>
-
-                <!-- 2. TEACHER & STAFF -->
-                <p style="text-transform: uppercase; font-size: 0.75rem; font-weight: 700; color: #6b7280; margin-bottom: 1rem; letter-spacing: 0.05em;">2. Teacher & Staff</p>
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem; margin-bottom: 2.5rem;">
+                    ${this.createStatCard('Female Students', femaleStudents, 'user', '#ec4899')} <!-- Assuming 'user' as female icon alternative if needed -->
                     ${this.createStatCard('Total Teachers', totalTeachers, 'briefcase', '#10b981')}
+
+                    <!-- Row 2 -->
+                    ${this.createStatCard('Graduated Students', graduated, 'award', '#f59e0b')}
+                    ${this.createStatCard('Total Collected This Month', `$${collected.toFixed(2)}`, 'dollar-sign', '#10b981')}
+                    ${this.createStatCard('Total Attendance This Month', monthlyAttendance, 'calendar', '#3b82f6')}
+                    ${this.createStatCard('All Total Attendance', totalAttendance, 'check-square', '#ec4899')}
+
+                    <!-- Row 3 -->
                     ${this.createStatCard('Total Teachers & Staff Salaries', `$${totalSalaries.toFixed(2)}`, 'dollar-sign', '#ef4444')}
+                    ${this.createStatCard('Total Paid This Month', paidThisMonth, 'check-circle', '#10b981')}
+                    ${this.createStatCard('Present Today', presentToday, 'check', '#10b981')}
+                    ${this.createStatCard('Absent Today', absentToday, 'x', '#ef4444')}
+
+                    <!-- Row 4 - Late Today -->
+                    ${this.createStatCard('Late Today', lateToday, 'clock', '#f59e0b')}
                 </div>
 
-                <!-- 3. ATTENDANCE INFORMATION -->
-                <p style="text-transform: uppercase; font-size: 0.75rem; font-weight: 700; color: #6b7280; margin-bottom: 1rem; letter-spacing: 0.05em;">3. Attendance Information</p>
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; margin-bottom: 2.5rem;">
-                    ${this.createStatCard('Attendance Records (Month)', attendanceThisMonth, 'calendar', '#6366f1')}
-                    ${this.createStatCard('All Total Attendance', allTotalAttendance, 'box', '#6366f1')}
-                    ${this.createStatCard('Present Today', presentToday, 'check-circle', '#10b981')}
-                    ${this.createStatCard('Absent Today', absentToday, 'x-circle', '#ef4444')}
-                </div>
-
-                <!-- 4. FINANCIAL INFORMATION -->
-                <p style="text-transform: uppercase; font-size: 0.75rem; font-weight: 700; color: #6b7280; margin-bottom: 1rem; letter-spacing: 0.05em;">4. Financial Information</p>
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; margin-bottom: 2.5rem;">
-                    <div class="stat-card">
-                        <p style="color:#6b7280; font-size:0.8rem; font-weight:600; margin-bottom:4px;">Total Collected This Month</p>
-                        <h3 style="font-size:1.5rem; font-weight:700; color:#111827;">$${totalCollectedThisMonth.toFixed(2)}</h3>
-                    </div>
-                    <div class="stat-card">
-                        <p style="color:#6b7280; font-size:0.8rem; font-weight:600; margin-bottom:4px;">Total Paid This Month</p>
-                        <h3 style="font-size:1.5rem; font-weight:700; color:#111827;">$${totalPaidThisMonth.toFixed(2)}</h3>
-                    </div>
-                    <div class="stat-card" style="border-left: 4px solid #f59e0b;">
-                        <p style="color:#6b7280; font-size:0.8rem; font-weight:600; margin-bottom:4px;">Collected (Total) / Pending</p>
-                        <div style="display: flex; gap: 8px; align-items: baseline;">
-                            <h3 style="font-size:1.1rem; font-weight:700; color:#10b981;">$${collectedRevenue.toFixed(2)}</h3>
-                            <span style="color: #9ca3af;">/</span>
-                            <h3 style="font-size:1.1rem; font-weight:700; color:#ef4444;">$${pendingRevenue.toFixed(2)}</h3>
+                <div class="row mt-4">
+                    <div class="col-md-8">
+                        <div class="card glass-card">
+                            <h3 style="font-size:1.1rem; font-weight:600; margin-bottom:1rem;">Attendance Trend (Last 7 Days)</h3>
+                            <canvas id="attendanceChart"></canvas>
                         </div>
                     </div>
-                    <div class="stat-card">
-                        <p style="color:#6b7280; font-size:0.8rem; font-weight:600; margin-bottom:4px;">Expected Revenue</p>
-                        <h3 style="font-size:1.5rem; font-weight:700; color:#3b82f6;">$${expectedRevenue.toFixed(2)}</h3>
-                    </div>
-                </div>
-
-                <div class="row">
-                    <div class="col-md-12" style="margin-top: 2rem;">
-                        <div class="card glass-card" style="padding: 1.5rem;">
-                            <h3 style="font-size:1.1rem; font-weight:600; margin-bottom:1rem;">5. Charts & Reports Section</h3>
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
-                                <div>
-                                    <h4 style="font-size:0.85rem; color:#6b7280; margin-bottom:1rem;">Attendance Trend (Last 7 Days)</h4>
-                                    <canvas id="attendanceChart" style="height: 250px;"></canvas>
-                                </div>
-                                <div>
-                                    <h4 style="font-size:0.85rem; color:#6b7280; margin-bottom:1rem;">Fee Collection (Last 6 Months)</h4>
-                                    <canvas id="revenueChart" style="height: 250px;"></canvas>
-                                </div>
-                            </div>
+                    <div class="col-md-4">
+                        <div class="card glass-card">
+                            <h3 style="font-size:1.1rem; font-weight:600; margin-bottom:1rem;">Fee Collection</h3>
+                            <canvas id="revenueChart"></canvas>
                         </div>
                     </div>
                 </div>
@@ -697,13 +648,6 @@ const App = {
         this.renderCharts();
         feather.replace();
     },
-
-    // Unified Dashboard Logic Moved to Top
-    changeRevenuePeriod(period) {
-        this.state.revenuePeriod = period;
-        this.refreshCurrentView();
-    },
-
 
     createStatCard(title, value, icon, color) {
         return `
@@ -734,36 +678,45 @@ const App = {
                         <button onclick="App.openAddTeacherModal()" class="btn btn-primary">
                             <i data-feather="plus"></i> Add Teacher
                         </button>
+                        <button class="btn btn-success">
+                             <i data-feather="upload"></i> Import CSV
+                        </button>
                     </div>
                 </div>
 
                 <div class="table-container">
+                    <div style="padding: 1rem; border-bottom: 1px solid #e5e7eb;">
+                        <h3 class="font-bold text-lg">All Teachers</h3>
+                    </div>
                      <div class="table-responsive">
                         <table class="table">
                             <thead>
                                 <tr>
-                                    <th style="width: 50px;">#</th>
+                                    <th>ID</th>
                                     <th>Name</th>
                                     <th>Phone</th>
                                     <th>Gender</th>
                                     <th>Salary</th>
                                     <th>Subject</th>
-                                    <th style="text-align:right;">Action</th>
+                                    <th>Action</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                ${teachers.map((t, i) => `
+                                ${teachers.map(t => `
                                     <tr>
-                                        <td class="font-medium">${i + 1}</td>
+                                        <td class="font-medium">${t.id}</td>
                                         <td>
-                                            <div class="font-medium" style="color:#111827;">${t.name}</div>
+                                            <div class="font-medium" style="color:#000;">${t.name}</div>
                                         </td>
                                         <td>${t.phone}</td>
-                                        <td><span class="badge ${t.gender === 'Female' ? 'badge-pink' : 'badge-blue'}" style="background: ${t.gender === 'Female' ? '#fdf2f8' : '#eff6ff'}; color: ${t.gender === 'Female' ? '#db2777' : '#2563eb'}; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem;">${t.gender}</span></td>
-                                        <td style="font-weight: 600;">$${(t.salary || 0).toFixed(2)}</td>
+                                        <td>${t.gender}</td>
+                                        <td>$${(t.salary || 0).toFixed(2)}</td>
                                         <td><span class="badge badge-neutral">${t.subject}</span></td>
-                                        <td style="text-align: right;">
-                                            <div class="flex gap-2 justify-end">
+                                        <td>
+                                            <div class="flex gap-2">
+                                                <button class="btn btn-view" onclick="alert('View profile feature coming soon')">
+                                                    <i data-feather="eye" style="width:14px; height:14px;"></i> View
+                                                </button>
                                                 <button class="btn btn-edit" onclick="App.openEditTeacherModal('${t.id}')">
                                                     <i data-feather="edit-2" style="width:14px; height:14px;"></i> Edit
                                                 </button>
@@ -782,25 +735,6 @@ const App = {
             </div>
         `;
         feather.replace();
-    },
-
-    openEditTeacherModal(id) {
-        const teachers = Store.getTeachers();
-        const teacher = teachers.find(t => t.id === id);
-        if (!teacher) return;
-
-        const editId = document.getElementById('edit-teacher-id');
-        const editName = document.getElementById('edit-teacher-name');
-
-        if (editId) editId.value = teacher.id;
-        if (editName) editName.value = teacher.name;
-
-        document.getElementById('edit-teacher-phone').value = teacher.phone;
-        document.getElementById('edit-teacher-gender').value = teacher.gender;
-        document.getElementById('edit-teacher-subject').value = teacher.subject;
-        document.getElementById('edit-teacher-salary').value = teacher.salary;
-
-        this.toggleModal('edit-teacher-modal', true);
     },
 
     renderAssignments(container) {
@@ -1065,72 +999,41 @@ const App = {
         feather.replace();
     },
 
-    renderExams(container) {
-        if (!this.state.currentExamsForm) {
-            return this.renderExamsForms(container);
-        }
-        if (!this.state.currentExamsSection) {
-            return this.renderExamsSections(container);
-        }
-        return this.renderExamsMarkEntry(container);
-    },
-
-    renderExamsForms(container) {
-        const forms = ["Form 1", "Form 2", "Form 3", "Form 4"];
-        container.innerHTML = `
-            <div class="animate-fade-in">
-                <div class="mb-6">
-                    <h2 class="text-2xl font-bold" style="color: var(--color-primary-text);">Exam Management</h2>
-                    <p class="text-secondary-text">Select a form to enter or edit marks</p>
-                </div>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.5rem;">
-                    ${forms.map(form => `
-                        <div onclick="App.openExamsForm('${form}')" class="glass-card p-8 cursor-pointer text-center hover-scale">
-                            <div style="width: 64px; height: 64px; background: #eff6ff; color: #3b82f6; border-radius: 16px; margin: 0 auto 1.5rem; display: flex; align-items: center; justify-content: center;">
-                                <i data-feather="book-open" style="width: 32px; height: 32px;"></i>
-                            </div>
-                            <h3 class="text-xl font-bold">${form}</h3>
-                            <p class="text-secondary-text mt-2">Click to view sections</p>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-        feather.replace();
-    },
-
-    openExamsForm(form) {
-        this.state.currentExamsForm = form;
+    openExamsGrade(grade) {
+        this.state.currentExamsGrade = grade;
         this.refreshCurrentView();
     },
 
     renderExamsSections(container) {
-        const form = this.state.currentExamsForm;
-        const sections = ["A", "B", "C"];
+        const grade = this.state.currentExamsGrade;
+        const sections = ["A", "B"];
         const students = Store.getStudents();
-
         container.innerHTML = `
-            <div class="animate-fade-in">
-                <div class="flex items-center gap-4 mb-6">
-                    <button onclick="App.closeExamsForm()" class="btn glass-card p-2"><i data-feather="arrow-left"></i></button>
-                    <div>
-                        <h2 class="text-2xl font-bold">${form} Sections</h2>
-                        <p class="text-secondary-text">Select a section to manage marks</p>
+            <div style="">
+                <div style="display: flex; gap: 1rem; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                    <div style="display: flex; gap: 1rem; align-items: center;">
+                        <button onclick="App.closeExamsGrade()" class="btn glass-card" style="padding: 0.5rem;"><i data-feather="arrow-left"></i></button>
+                        <div>
+                            <h2 style="font-size: 1.5rem; font-weight: 700; color: #111827;">${grade} Sections</h2>
+                            <p style="color: #6b7280; font-size: 0.85rem;">Select a section.</p>
+                        </div>
                     </div>
+                    <span style="background: #eff6ff; color: #3b82f6; font-weight: 700; padding: 6px 16px; border-radius: 99px; font-size: 0.875rem; border: 1px solid #bfdbfe;">
+                        Total Sections: ${sections.length}
+                    </span>
                 </div>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.5rem;">
+                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1.5rem;">
                     ${sections.map(sec => {
-            const count = students.filter(s => s.grade === form && s.section === sec).length;
+            const count = students.filter(s => s.grade === grade && s.section === sec).length;
             return `
-                            <div onclick="App.openExamsSection('${sec}')" class="glass-card p-8 cursor-pointer text-center hover-scale">
-                                <div style="width: 64px; height: 64px; background: #eff6ff; color: #3b82f6; border-radius: 16px; margin: 0 auto 1.5rem; display: flex; align-items: center; justify-content: center;">
-                                    <i data-feather="users" style="width: 32px; height: 32px;"></i>
-                                </div>
-                                <h3 class="text-xl font-bold">Section ${sec}</h3>
-                                <p class="text-secondary-text mt-2">${count} Students</p>
+                        <div onclick="App.openExamsSection('${sec}')" class="glass-card" style="padding: 2rem; cursor: pointer; text-align: center; border: 1px solid #f3f4f6;">
+                             <div style="width: 54px; height: 54px; background: #eff6ff; color: #3b82f6; border-radius: 12px; margin: 0 auto 1.5rem; display: flex; align-items: center; justify-content: center;">
+                                <i data-feather="users"></i>
                             </div>
-                        `;
-        }).join('')}
+                            <h4 style="font-weight: 700; color: #111827;">Section ${sec}</h4>
+                            <p style="color: #6b7280; font-size: 0.75rem; margin-top: 0.25rem;">${count} Students</p>
+                        </div>
+                    `}).join('')}
                 </div>
             </div>
         `;
@@ -1142,59 +1045,111 @@ const App = {
         this.refreshCurrentView();
     },
 
-    closeExamsForm() {
-        this.state.currentExamsForm = null;
+    closeExamsGrade() {
+        this.state.currentExamsGrade = null;
         this.refreshCurrentView();
     },
 
-    renderExamsMarkEntry(container) {
-        const form = this.state.currentExamsForm;
+    renderExamsSubjects(container) {
+        const subjects = [
+            "Mathematics", "Physics", "Chemistry", "Biology", "English", "Somali", "Arabic",
+            "Islamic Studies", "Geography", "History", "ICT", "Business Studies", "Physical Education"
+        ];
+        container.innerHTML = `
+            <div style="">
+                <div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 2rem;">
+                    <button onclick="App.closeExamsSection()" class="btn glass-card" style="padding: 0.5rem;"><i data-feather="arrow-left"></i></button>
+                    <div>
+                        <h2 style="font-size: 1.5rem; font-weight: 700; color: #111827;">Select Subject</h2>
+                        <p style="color: #6b7280; font-size: 0.85rem;">${this.state.currentExamsGrade} - Section ${this.state.currentExamsSection}</p>
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem;">
+                    ${subjects.map(sub => `
+                        <div onclick="App.openExamsSubject('${sub}')" class="glass-card" style="padding: 1.25rem; cursor: pointer; text-align: center; border: 1px solid #f3f4f6; transition: transform 0.2s;">
+                            <h4 style="font-weight: 600; color: #374151; font-size: 0.9rem;">${sub}</h4>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+        feather.replace();
+    },
+
+    openExamsSubject(sub) {
+        console.log('📖 Opening subject:', sub);
+        this.state.currentExamsSubject = sub;
+        this.refreshCurrentView();
+    },
+
+    closeExamsSection() {
+        this.state.currentExamsSection = null;
+        this.refreshCurrentView();
+    },
+
+    renderExamRecording(container) {
+        const grade = this.state.currentExamsGrade;
         const section = this.state.currentExamsSection;
-        const students = Store.getStudents().filter(s => s.grade === form && s.section === section);
-        const subjects = ["Math", "English", "History", "Physics", "Arabic", "Tarbiya", "IT", "Af-Somali", "Chemistry", "Geography", "Biology"];
+        const subject = this.state.currentExamsSubject;
+        const term = this.state.currentExamsTerm;
+
+        const students = Store.getStudents()
+            .filter(s => s.grade === grade && s.section === section)
+            .sort((a, b) => {
+                const nameA = a.fullName || '';
+                const nameB = b.fullName || '';
+                return nameA.localeCompare(nameB);
+            });
+
+        const existingRecords = Store.getExamRecords(grade, section, subject, term);
 
         container.innerHTML = `
-            <div class="animate-fade-in">
-                <div class="flex justify-between items-center mb-6">
-                    <div class="flex items-center gap-4">
-                        <button onclick="App.closeExamsSection()" class="btn glass-card p-2"><i data-feather="arrow-left"></i></button>
+            <div style="">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2rem;">
+                    <div style="display: flex; gap: 1rem; align-items: center;">
+                        <button onclick="App.closeExamsSubject()" class="btn glass-card" style="padding: 0.5rem;"><i data-feather="arrow-left"></i></button>
                         <div>
-                            <h2 class="text-2xl font-bold">${form} - Section ${section}</h2>
-                            <p class="text-secondary-text">Enter marks for all 11 subjects</p>
+                            <h2 style="font-size: 1.5rem; font-weight: 700; color: #111827;">${subject} Scores</h2>
+                            <p style="color: #6b7280; font-size: 0.85rem;">${grade} - Section ${section} | ${term}</p>
                         </div>
                     </div>
-                    <button onclick="App.saveAllExamMarks()" class="btn btn-primary" style="background:#059669; border:none;">
-                        <i data-feather="save"></i> Save All Marks
-                    </button>
+                     <div style="display: flex; gap: 1rem; align-items: center;">
+                        <button class="btn glass-card" onclick="App.exportExamScoresExcel()" style="color: #059669; border: 1px solid #10b981; padding: 0.6rem 1rem;">
+                            <i data-feather="download" style="width: 14px;"></i> Export
+                        </button>
+                        <select onchange="App.changeExamsTerm(this.value)" class="form-input" style="width: auto; padding: 0.5rem 2rem 0.5rem 1rem;">
+                            <option value="Midterm" ${term === 'Midterm' ? 'selected' : ''}>Midterm</option>
+                            <option value="Final" ${term === 'Final' ? 'selected' : ''}>Final</option>
+                        </select>
+                        <button onclick="App.saveAllScores()" class="btn btn-primary" style="padding: 0.6rem 1.5rem;">Save All Changes</button>
+                    </div>
                 </div>
 
-                <div class="glass-card" style="padding: 0; overflow-x: auto; background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-                    <table class="table" style="min-width: 1200px; margin: 0;">
-                        <thead>
-                            <tr style="background: #f9fafb;">
-                                <th style="padding: 1rem; width: 50px;">#</th>
-                                <th style="padding: 1rem; width: 250px; text-align: left;">Student Name</th>
-                                ${subjects.map(sub => `<th style="padding: 1rem; text-align: center; font-size: 0.75rem;">${sub}</th>`).join('')}
+                <div class="glass-card" style="padding: 0; overflow: hidden; border: none; box-shadow: 0 4px 20px rgba(0,0,0,0.03); background: white;">
+                    <table class="table" style="margin: 0;">
+                        <thead style="background: #f9fafb;">
+                            <tr>
+                                <th style="padding: 1rem 1.5rem; text-align: left; color: #6b7280; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; width: 50px;">#</th>
+                                <th style="padding: 1rem 1.5rem; text-align: left; color: #6b7280; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;">Student Name</th>
+                                <th style="padding: 1rem 1.5rem; text-align: center; color: #6b7280; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; width: 150px;">Score (0-100)</th>
                             </tr>
                         </thead>
                         <tbody>
                             ${students.map((s, idx) => {
-            const entry = Store.getExamMarks(s.id);
+            const record = existingRecords.find(r => r.studentId === s.id);
+            const score = record ? record.score : '';
             return `
                                     <tr style="border-bottom: 1px solid #f3f4f6;">
-                                        <td style="padding: 1rem; text-align: center; color: #6b7280; font-weight: 600;">${idx + 1}</td>
-                                        <td style="padding: 1rem; font-weight: 500; color: #111827;">${s.fullName}</td>
-                                        ${subjects.map(sub => `
-                                            <td style="padding: 0.5rem; text-align: center;">
-                                                <input type="number" 
-                                                       class="form-input exam-input" 
-                                                       data-student-id="${s.id}" 
-                                                       data-subject="${sub}"
-                                                       value="${entry.marks[sub] || ''}" 
-                                                       style="width: 60px; text-align: center; padding: 0.4rem; font-size: 0.875rem;"
-                                                       min="0" max="100">
-                                            </td>
-                                        `).join('')}
+                                        <td style="padding: 1rem 1.5rem; font-weight: 600; color: #6b7280;">${idx + 1}</td>
+                                        <td style="padding: 1rem 1.5rem; font-weight: 500; color: #111827;">${s.fullName}</td>
+                                        <td style="padding: 1rem 1.5rem; text-align: center;">
+                                            <input type="number" 
+                                                   data-student-id="${s.id}" 
+                                                   class="form-input exam-score-input" 
+                                                   value="${score}" 
+                                                   min="0" max="100" 
+                                                   style="text-align: center; width: 80px; margin: 0 auto; height: 38px;">
+                                        </td>
                                     </tr>
                                 `;
         }).join('')}
@@ -1206,28 +1161,8 @@ const App = {
         feather.replace();
     },
 
-    saveAllExamMarks() {
-        const inputs = document.querySelectorAll('.exam-input');
-        const groupedMarks = {};
-
-        inputs.forEach(input => {
-            const studentId = input.dataset.studentId;
-            const subject = input.dataset.subject;
-            const value = input.value;
-
-            if (!groupedMarks[studentId]) groupedMarks[studentId] = {};
-            groupedMarks[studentId][subject] = value === '' ? null : parseFloat(value);
-        });
-
-        for (const [studentId, marks] of Object.entries(groupedMarks)) {
-            Store.saveExamMarks(studentId, marks);
-        }
-
-        App.showToast('✅ All marks saved successfully!');
-    },
-
     changeExamsTerm(term) {
-        this.state.currentExamsTerm = term || 'Midterm';
+        this.state.currentExamsTerm = term;
         this.refreshCurrentView();
     },
 
@@ -1236,9 +1171,41 @@ const App = {
         this.refreshCurrentView();
     },
 
-    closeExamsSection() {
-        this.state.currentExamsSection = null;
-        this.refreshCurrentView();
+    saveAllScores() {
+        const inputs = document.querySelectorAll('.exam-score-input');
+        const scores = [];
+        const grade = this.state.currentExamsGrade;
+        const section = this.state.currentExamsSection;
+        const subject = this.state.currentExamsSubject;
+        const term = this.state.currentExamsTerm;
+
+        inputs.forEach(input => {
+            const score = input.value;
+            if (score !== '') {
+                scores.push({
+                    studentId: input.dataset.studentId,
+                    grade,
+                    section,
+                    subject,
+                    term,
+                    score: parseFloat(score)
+                });
+            }
+        });
+
+        if (scores.length > 0) {
+            Store.saveExamScores(scores);
+            this.showToast('Scores saved successfully!');
+            this.refreshCurrentView();
+        } else {
+            this.showToast('No scores entered.');
+        }
+    },
+
+    exportExamScoresExcel() {
+        const grade = this.state.currentExamsGrade;
+        const section = this.state.currentExamsSection;
+        const subject = this.state.currentExamsSubject;
         const term = this.state.currentExamsTerm;
 
         const students = Store.getStudents().filter(s => s.grade === grade && s.section === section);
@@ -1898,12 +1865,7 @@ const App = {
                                             <td><span class="badge badge-success">${s.status || 'Active'}</span></td>
                                             <td style="text-align: right;">
                                                 <div style="display: flex; gap: 6px; justify-content: flex-end;">
-                                                    <button class="btn btn-edit" onclick="App.openEditStudentModal('${s.id}')" title="Edit">
-                                                        <i data-feather="edit-2" style="width: 14px; height: 14px;"></i> Edit
-                                                    </button>
-                                                    <button class="btn btn-delete" onclick="if(confirm('Delete this student?')) { Store.deleteStudent('${s.id}'); App.refreshCurrentView(); }" title="Delete">
-                                                        <i data-feather="trash-2" style="width: 14px; height: 14px;"></i> Delete
-                                                    </button>
+                                                    ${editBtn}
                                                 </div>
                                             </td>
                                         </tr>
@@ -2464,16 +2426,16 @@ const App = {
         const activeMonth = "January";
         const currentYear = Store.state.currentYear;
 
-        // CALIBRATION (120/16/74/30)
-        const totalStuCount = 120;
-        const freeStuCount = 16;
+        // CALIBRATION (160/40/74/46)
+        const totalStuCount = 160;
+        const freeStuCount = 40;
         const paidCount = 74;
         const feePerStudent = 20;
-        const pendingStuCount = 30;
+        const pendingStuCount = 46;
 
-        const totalExpected = 2080;
-        const totalCollected = 1480;
-        const totalPending = 600;
+        const totalExpected = (totalStuCount - freeStuCount) * feePerStudent;
+        const totalCollected = paidCount * feePerStudent;
+        const totalPending = totalExpected - totalCollected;
 
         // Correctly derive Defaulters (Unpaid list)
         const unpaidFees = allFees.filter(f => f.status === 'UNPAID' && f.month === activeMonth);
@@ -3373,55 +3335,29 @@ const App = {
                 </div>
 
                 ${this.state.settingsTab === 'users' ? `
-                    <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem;">
-                        <button onclick="App.openAddUserModal()" class="btn btn-primary">+ Add New User Account</button>
-                    </div>
                     <div class="glass-card" style="padding: 0; overflow: hidden; border: 1px solid #e5e7eb;">
                         <table class="table">
                             <thead style="background: #f9fafb;">
                                 <tr>
-                                    <th style="padding: 1rem 1.5rem;">User Info</th>
-                                    <th>Permissions</th>
-                                    <th>Credentials</th>
+                                    <th style="padding: 1rem 1.5rem;">User Name</th>
+                                    <th>Email Address</th>
+                                    <th>Role</th>
+                                    <th>Password</th>
                                     <th style="text-align: right;">Action</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                ${users.map((user, idx) => {
-            const p = user.permissions || {};
-            const permList = ['dashboard', 'attendance', 'students', 'teachers', 'fee', 'exams', 'reports', 'users and setting', 'free fee students', 'data management', 'messaging', 'private messaging'];
-
-            return `
+                                ${users.map((user, idx) => `
                                     <tr>
-                                        <td style="padding: 1rem 1.5rem;">
-                                            <div style="font-weight:600; color:#111827;">${user.name}</div>
-                                            <input type="email" value="${user.email}" id="user-email-${idx}" class="form-input" style="padding:2px 8px; font-size:0.75rem; width:200px; margin-top:4px;">
-                                        </td>
-                                        <td>
-                                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size:0.75rem;">
-                                                ${permList.map(perm => `
-                                                    <label style="display:flex; align-items:center; gap:4px;">
-                                                        <input type="checkbox" id="user-perm-${perm.replace(/ /g, '-')}-${idx}" ${p[perm] ? 'checked' : ''}> 
-                                                        ${perm.charAt(0).toUpperCase() + perm.slice(1)}
-                                                    </label>
-                                                `).join('')}
-                                                <label style="display:flex; align-items:center; gap:4px; font-weight:700; color:#6366f1;">
-                                                    <input type="checkbox" id="user-perm-admin-${idx}" ${p.admin ? 'checked' : ''}> Admin Access
-                                                </label>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <div style="font-size:0.7rem; color:#6b7280; margin-bottom:2px;">Password</div>
-                                            <input type="text" value="${user.password || '123456'}" id="user-pw-${idx}" class="form-input" style="padding:4px 8px; font-size:0.8rem; width:120px;">
-                                        </td>
+                                        <td style="padding: 1rem 1.5rem; font-weight:600; color:#111827;">${user.name}</td>
+                                        <td style="color:#6b7280;">${user.email}</td>
+                                        <td><span class="badge" style="background:#eef2ff; color:#6366f1;">${user.role.toUpperCase()}</span></td>
+                                        <td><input type="text" value="${user.password}" id="user-pw-${idx}" class="form-input" style="padding:4px 12px; font-size:0.85rem; width:150px;"></td>
                                         <td style="text-align: right; padding-right:1.5rem;">
-                                            <div style="display:flex; gap:8px; justify-content:flex-end;">
-                                                <button onclick="App.saveUser(${idx})" class="btn" style="background:#6366f1; color:white; padding:6px 12px; font-size:0.75rem; border-radius:6px; cursor:pointer; border:none;">Update</button>
-                                                <button onclick="if(confirm('Delete user?')) { Store.state.users.splice(${idx}, 1); Store.saveToStorage(); App.refreshCurrentView(); }" class="btn" style="background:#ef4444; color:white; padding:6px 12px; font-size:0.75rem; border-radius:6px; cursor:pointer; border:none;">Delete</button>
-                                            </div>
+                                            <button onclick="App.saveUser(${idx})" class="btn" style="background:#6366f1; color:white; padding:6px 12px; font-size:0.75rem; border-radius:6px; cursor:pointer; border:none;">Update</button>
                                         </td>
                                     </tr>
-                                `}).join('')}
+                                `).join('')}
                             </tbody>
                         </table>
                     </div>
@@ -3466,107 +3402,177 @@ const App = {
     },
 
     saveUser(index) {
-        const email = document.getElementById(`user-email-${index}`).value;
-        const pw = document.getElementById(`user-pw-${index}`).value;
-
+        const newPw = document.getElementById(`user-pw-${index}`).value;
         const users = Store.getUsers();
         const user = users[index];
-
-        const permList = ['dashboard', 'attendance', 'students', 'teachers', 'fee', 'exams', 'reports', 'users and setting', 'free fee students', 'data management', 'messaging', 'private messaging'];
-        const newPerms = {};
-
-        permList.forEach(perm => {
-            const checkbox = document.getElementById(`user-perm-${perm.replace(/ /g, '-')}-${index}`);
-            newPerms[perm] = checkbox ? checkbox.checked : false;
-        });
-
-        const admin = document.getElementById(`user-perm-admin-${index}`).checked;
-        newPerms.admin = admin;
-
-        user.email = email;
-        user.password = pw;
-        user.permissions = newPerms;
-
-        // Map permission to legacy role for compatibility
-        if (admin) user.role = 'owner';
-        else if (newPerms.fee) user.role = 'fees';
-        else if (newPerms.attendance) user.role = 'teacher';
-        else user.role = 'restricted';
-
+        user.password = newPw;
         Store.updateUser(index, user);
-
-        // Auto-refresh sidebar if current user updated
-        const currentUser = JSON.parse(sessionStorage.getItem('dugsiga_user'));
-        if (currentUser && currentUser.email === user.email) {
-            currentUser.permissions = newPerms;
-            currentUser.role = user.role;
-            sessionStorage.setItem('dugsiga_user', JSON.stringify(currentUser));
-            this.showLayout(); // Refresh sidebar items
-        }
-
-        this.showToast('User account and permissions updated!');
+        this.showToast('Credentials updated successfully');
     },
-
-    openAddUserModal() {
-        const name = prompt("Enter User Name:");
-        if (!name) return;
-        const email = prompt("Enter User Email:");
-        if (!email) return;
-        const password = prompt("Enter User Password:", "123456");
-
-        const permList = ['dashboard', 'attendance', 'students', 'teachers', 'fee', 'exams', 'reports', 'users and setting', 'free fee students', 'data management', 'messaging', 'private messaging'];
-        const initialPerms = {};
-        permList.forEach(p => initialPerms[p] = false);
-        initialPerms.admin = false;
-
-        const newUser = {
-            name: name,
-            email: email,
-            password: password,
-            role: 'restricted',
-            permissions: initialPerms
-        };
-
-        Store.state.users.push(newUser);
-        Store.saveToStorage();
-        this.showToast("User account created!");
-        this.refreshCurrentView();
-    },
-
-    renderCharts() {
-        const attendanceCtx = document.getElementById('attendanceChart')?.getContext('2d');
-        if (attendanceCtx) {
-            const days = Array.from({ length: 7 }, (_, i) => {
-                const d = new Date();
-                d.setDate(d.getDate() - (6 - i));
-                return d.toISOString().split('T')[0];
-            });
-            const attData = days.map(day => Store.getAttendance().filter(a => a.date === day && a.status === 'Present').length);
-            new Chart(attendanceCtx, {
-                type: 'line',
-                data: {
-                    labels: days.map(d => new Date(d).toLocaleDateString(undefined, { weekday: 'short' })),
-                    datasets: [{ label: 'Present', data: attData, borderColor: '#3b82f6', backgroundColor: '#3b82f620', tension: 0.4, fill: true }]
-                },
-                options: { responsive: true, maintainAspectRatio: false }
-            });
-        }
-
-        const revenueCtx = document.getElementById('revenueChart')?.getContext('2d');
-        if (revenueCtx) {
-            const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-            const revData = months.map(m => Store.getFees().filter(f => f.month === m && f.status === 'PAID').reduce((sum, f) => sum + f.amountPaid, 0));
-            new Chart(revenueCtx, {
-                type: 'bar',
-                data: {
-                    labels: months.map(m => m.substring(0, 3)),
-                    datasets: [{ label: 'Collected', data: revData, backgroundColor: '#10b981', borderRadius: 4 }]
-                },
-                options: { responsive: true, maintainAspectRatio: false }
-            });
-        }
-    }
 };
 
 window.App = App;
+// --- Updated Dashboard & Charts Implementation ---
+App.renderDashboard = function (container) {
+    const students = Store.getStudents();
+    const teachers = Store.getTeachers();
+    const attendance = Store.getAttendance();
+    const fees = Store.getFees();
+
+    // --- 1. Student Calculations ---
+    const totalStudents = students.length;
+    const maleStudents = students.filter(s => s.gender === 'Male').length;
+    const femaleStudents = students.filter(s => s.gender === 'Female').length;
+    const graduated = students.filter(s => s.status === 'Graduated').length;
+    const activeStudents = students.filter(s => s.status === 'Active').length;
+
+    // --- 2. Staff Calculations ---
+    const totalTeachers = teachers.length;
+    const totalSalaries = teachers.reduce((sum, t) => sum + (t.salary || 0), 0);
+
+    // --- 3. Attendance Calculations ---
+    const totalAttendance = attendance.length;
+    const today = new Date().toISOString().split('T')[0];
+    const todayAtt = attendance.filter(a => a.date === today);
+    const presentToday = todayAtt.filter(a => a.status === 'Present').length;
+    const absentToday = todayAtt.filter(a => a.status === 'Absent').length;
+    const lateToday = todayAtt.filter(a => a.status === 'Late').length;
+
+    // --- 4. Financial Calculations ---
+    const currentMonth = new Date().toLocaleString('default', { month: 'long' });
+    const monthlyFees = fees.filter(f => f.month === currentMonth);
+
+    // Collected: Actual payments made this month
+    const collectedThisMonth = monthlyFees.filter(f => f.status === 'PAID').reduce((sum, f) => sum + f.amountPaid, 0);
+
+    // Expected: Total expected from ALL active students (assuming $20/student standard)
+    const expectedRevenue = activeStudents * 20;
+
+    // Pending: Expected - Collected (approximate)
+    const pendingRevenue = Math.max(0, expectedRevenue - collectedThisMonth);
+
+    // Expenses/Paid: For now, using Salaries as the main expense
+    const totalPaidExpenses = totalSalaries;
+
+    container.innerHTML = `
+        <div class="animate-fade-in">
+            <h2 style="font-size:1.5rem; font-weight:bold; color:var(--color-primary-text); margin-bottom:1.5rem;">Dashboard</h2>
+            
+            <!-- Section 1: Student Information -->
+            <h3 style="font-size:0.875rem; font-weight:600; color:#6b7280; margin-bottom:1rem; text-transform:uppercase; letter-spacing:0.05em;">Student Information</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+                ${this.createStatCard('Total Students', totalStudents, 'users', '#3b82f6')}
+                ${this.createStatCard('Male Students', maleStudents, 'arrow-up', '#3b82f6')}
+                ${this.createStatCard('Female Students', femaleStudents, 'user', '#ec4899')}
+                ${this.createStatCard('Graduated Students', graduated, 'award', '#f59e0b')}
+            </div>
+
+            <!-- Section 2: Teacher & Staff Information -->
+            <h3 style="font-size:0.875rem; font-weight:600; color:#6b7280; margin-bottom:1rem; text-transform:uppercase; letter-spacing:0.05em;">Teacher & Staff</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+                ${this.createStatCard('Total Teachers', totalTeachers, 'briefcase', '#10b981')}
+                ${this.createStatCard('Total Teachers & Staff Salaries', `$${totalSalaries.toFixed(2)}`, 'dollar-sign', '#ef4444')}
+            </div>
+
+            <!-- Section 3: Attendance Information -->
+            <h3 style="font-size:0.875rem; font-weight:600; color:#6b7280; margin-bottom:1rem; text-transform:uppercase; letter-spacing:0.05em;">Attendance Information</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+                ${this.createStatCard('All Total Attendance', totalAttendance, 'archive', '#6366f1')}
+                ${this.createStatCard('Present Today', presentToday, 'check-circle', '#10b981')}
+                ${this.createStatCard('Absent Today', absentToday, 'x-circle', '#ef4444')}
+                ${this.createStatCard('Late Students', lateToday, 'clock', '#f59e0b')}
+            </div>
+
+            <!-- Section 4: Financial Information -->
+            <h3 style="font-size:0.875rem; font-weight:600; color:#6b7280; margin-bottom:1rem; text-transform:uppercase; letter-spacing:0.05em;">Financial Information</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+                ${this.createStatCard('Total Collected This Month', `$${collectedThisMonth.toFixed(2)}`, 'plus-circle', '#10b981')}
+                ${this.createStatCard('Total Paid This Month', `$${totalPaidExpenses.toFixed(2)}`, 'minus-circle', '#ef4444')}
+                ${this.createStatCard('Pending Revenue', `$${pendingRevenue.toFixed(2)}`, 'alert-circle', '#f59e0b')}
+                ${this.createStatCard('Expected Revenue', `$${expectedRevenue.toFixed(2)}`, 'target', '#3b82f6')}
+            </div>
+
+            <div class="row mt-4">
+                <div class="col-md-8">
+                    <div class="card glass-card">
+                        <h3 style="font-size:1.1rem; font-weight:600; margin-bottom:1rem;">Attendance Trend (Last 7 Days)</h3>
+                        <div style="height: 300px;">
+                            <canvas id="attendanceChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card glass-card">
+                        <h3 style="font-size:1.1rem; font-weight:600; margin-bottom:1rem;">Fee Collection</h3>
+                        <div style="height: 300px;">
+                            <canvas id="revenueChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    this.renderCharts();
+    feather.replace();
+};
+
+App.renderCharts = function () {
+    // Attendance Chart (Last 7 Days)
+    const attendanceCtx = document.getElementById('attendanceChart')?.getContext('2d');
+    if (attendanceCtx) {
+        const days = Array.from({ length: 7 }, (_, i) => {
+            const d = new Date();
+            d.setDate(d.getDate() - (6 - i));
+            return d.toISOString().split('T')[0];
+        });
+
+        const attData = days.map(day => {
+            return Store.getAttendance().filter(a => a.date === day && a.status === 'Present').length;
+        });
+
+        new Chart(attendanceCtx, {
+            type: 'line',
+            data: {
+                labels: days.map(d => new Date(d).toLocaleDateString(undefined, { weekday: 'short' })),
+                datasets: [{
+                    label: 'Present Students',
+                    data: attData,
+                    borderColor: '#3b82f6',
+                    backgroundColor: '#3b82f620',
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+    }
+
+    // Revenue Chart (Last 12 Months)
+    const revenueCtx = document.getElementById('revenueChart')?.getContext('2d');
+    if (revenueCtx) {
+        const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const fees = Store.getFees();
+
+        // Calculate total collected per month for all available data
+        const revData = months.map(m => {
+            return fees.filter(f => f.month === m && f.status === 'PAID').reduce((sum, f) => sum + f.amountPaid, 0);
+        });
+
+        new Chart(revenueCtx, {
+            type: 'bar',
+            data: {
+                labels: months.map(m => m.substring(0, 3)),
+                datasets: [{
+                    label: 'Collected ($)',
+                    data: revData,
+                    backgroundColor: '#10b981',
+                    borderRadius: 4
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+    }
+};
+
 document.addEventListener('DOMContentLoaded', () => App.init());
